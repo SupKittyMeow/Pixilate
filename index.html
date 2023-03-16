@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Pixelate Image</title>
+    <meta charset="utf-8">
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+      }
+      .container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 20px;
+      }
+      .image-upload {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 20px;
+        border: 2px dashed #ccc;
+        padding: 10px;
+      }
+      .image-upload img {
+        max-width: 300px;
+        max-height: 300px;
+        margin: 10px 0;
+      }
+      .image-upload input[type=file] {
+        display: none;
+      }
+      .pixelate-form {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        margin: 20px;
+      }
+      .pixelate-form label {
+        display: block;
+        margin-bottom: 10px;
+      }
+      .pixelate-form input[type=range] {
+        width: 300px;
+        margin-bottom: 10px;
+      }
+      .download-btn {
+        margin-top: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="image-upload">
+        <label for="image-input">Upload Image</label>
+        <img id="image-preview">
+        <input type="file" id="image-input">
+      </div>
+      <form class="pixelate-form">
+        <label for="pixelate-level">Pixelate Level</label>
+        <input type="range" id="pixelate-level" min="2" max="50" step="1" value="10">
+        <label for="palette-size">Palette Size</label>
+        <input type="range" id="palette-size" min="2" max="16" step="1" value="8">
+        <button type="button" id="pixelate-btn">Pixelate</button>
+      </form>
+      <a href="#" download="pixelated_image.png" class="download-btn" id="download-btn">Download Image</a>
+    </div>
+
+    <script>
+      // Image upload
+      const imageInput = document.getElementById('image-input');
+      const imagePreview = document.getElementById('image-preview');
+      
+      imageInput.addEventListener('change', () => {
+        const file = imageInput.files[0];
+        const reader = new FileReader();
+        reader.onload = () => {
+          imagePreview.src = reader.result;
+        };
+        reader.readAsDataURL(file);
+      });
+
+      // Pixelate
+      const pixelateBtn = document.getElementById('pixelate-btn');
+      const downloadBtn = document.getElementById('download-btn');
+      pixelateBtn.addEventListener('click', () => {
+        const pixelateLevel = document.getElementById('pixelate-level').value;
+        const paletteSize = document.getElementById('palette-size').value;
+
+        const img = new Image();
+        img.src = imagePreview.src;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+
+          const imageData = ctx.getImageData(0, 0, img.width, img.height);
+          const pixels = imageData.data;
+          
+                // Downsample the image
+      const downsampledWidth = Math.floor(img.width / pixelateLevel);
+      const downsampledHeight = Math.floor(img.height / pixelateLevel);
+      const downsampledCanvas = document.createElement('canvas');
+      downsampledCanvas.width = downsampledWidth;
+      downsampledCanvas.height = downsampledHeight;
+      const downsampledCtx = downsampledCanvas.getContext('2d');
+      downsampledCtx.drawImage(img, 0, 0, downsampledWidth, downsampledHeight);
+      const downsampledImageData = downsampledCtx.getImageData(0, 0, downsampledWidth, downsampledHeight);
+      const downsampledPixels = downsampledImageData.data;
+
+      // Reshape the downsampled image to a 2D array
+      const pixels = [];
+      for (let i = 0; i < downsampledPixels.length; i += 4) {
+        const r = downsampledPixels[i];
+        const g = downsampledPixels[i + 1];
+        const b = downsampledPixels[i + 2];
+        pixels.push([r, g, b]);
+      }
+
+      // Find the dominant colors using KMeans clustering
+      const kmeans = new KMeans(paletteSize, 100);
+      const clusters = kmeans.cluster(pixels);
+      const colors = clusters.centroids;
+
+      // Replace each pixel in the downsampled image with the nearest color in the color palette
+      const quantizedPixels = new Uint8ClampedArray(downsampledPixels.length);
+      for (let i = 0; i < downsampledPixels.length; i += 4) {
+        const r = downsampledPixels[i];
+        const g = downsampledPixels[i + 1];
+        const b = downsampledPixels[i + 2];
+        const pixelColor = [r, g, b];
+        let minDistance = Number.MAX_VALUE;
+        let nearestColor = [0, 0, 0];
+        for (let j = 0; j < colors.length; j++) {
+          const color = colors[j];
+          const distance = Math.sqrt(Math.pow(pixelColor[0] - color[0], 2) + Math.pow(pixelColor[1] - color[1], 2) + Math.pow(pixelColor[2] - color[2], 2));
+          if (distance < minDistance) {
+            minDistance = distance;
+            nearestColor = color;
+          }
+        }
+        quantizedPixels[i] = nearestColor[0];
+        quantizedPixels[i + 1] = nearestColor[1];
+        quantizedPixels[i + 2] = nearestColor[2];
+        quantizedPixels[i + 3] = downsampledPixels[i + 3];
+      }
+      const quantizedImageData = new ImageData(quantizedPixels, downsampledWidth, downsampledHeight);
+
+      // Upsample the quantized image to the original size
+      const upsampledCanvas = document.createElement('canvas');
+      upsampledCanvas.width = img.width;
+      upsampledCanvas.height = img.height;
+      const upsampledCtx = upsampledCanvas.getContext('2d');
+      upsampledCtx.imageSmoothingEnabled = false;
+      upsampledCtx.drawImage(downsampledCanvas, 0, 0, downsampledWidth, downsampledHeight, 0, 0, img.width, img.height);
+      upsampledCtx.putImageData(quantizedImageData, 0, 0);
+
+      // Set the preview image to the pixelated image
+      imagePreview.src = upsampledCanvas.toDataURL
